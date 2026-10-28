@@ -1,0 +1,115 @@
+name: Student Score ModelOps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  repository_dispatch:
+    types: [ml_ci_cd]
+
+permissions:
+  contents: read
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download dataset from Cloudinary
+        if: github.event_name == 'repository_dispatch'
+        env:
+          DATASET_URL: ${{ github.event.client_payload.dataseturl }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$DATASET_URL" ]; then
+            echo "::error::Falta el parámetro dataseturl"
+            exit 1
+          fi
+
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+
+          url = os.environ["DATASET_URL"]
+          parsed = urlparse(url)
+
+          if parsed.scheme != "https" or not parsed.netloc:
+              raise SystemExit("La URL debe ser HTTPS válida")
+          PY
+
+          curl -fL --retry 3 \
+            "$DATASET_URL" \
+            -o data/StudentsPerformance.csv
+
+      - name: Validate dataset
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          df = pd.read_csv("data/StudentsPerformance.csv")
+
+          if df.empty:
+              raise SystemExit("El dataset está vacío")
+
+          if "Final_Exam_Score" not in df.columns:
+              raise SystemExit(
+                  "Falta la columna Final_Exam_Score"
+              )
+
+          print(f"Filas: {len(df)}")
+          print(f"Columnas: {len(df.columns)}")
+          PY
+
+      - name: Train model
+        run: python model/train.py
+
+      - name: Save trained model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: student-score-model-${{ github.event.client_payload.sha || github.sha }}
+          path: model/student-score-v1.joblib
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Validate model tag
+        if: github.event_name == 'repository_dispatch'
+        env:
+          MODEL_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          if [[ ! "$MODEL_SHA" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::El parámetro sha no es una etiqueta Docker válida"
+            exit 1
+          fi
+
+      - name: Login to Docker Hub
+        if: github.event_name == 'repository_dispatch'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push Docker image
+        if: github.event_name == 'repository_dispatch'
+        env:
+          DOCKER_USER: ${{ secrets.DOCKER_USER }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+          MODEL_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          IMAGE="$DOCKER_USER/$MODEL_NAME:$MODEL_SHA"
+
+          docker build --platform linux/amd64 -t "$IMAGE" .
+          docker push "$IMAGE"
