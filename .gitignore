@@ -1,0 +1,39 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+ml-env/
+
+# Caché y archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Herramientas de desarrollo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Variables de entorno y secretos locales
+.env
+.env.*
+!.env.example
+
+# Archivos del sistema y editores
+.DS_Store
+.idea/
+.vscode/
+
+# Artefactos de distribución y builds
+build/
+dist/
+*.egg-info/
+
+# Archivos temporales y logs
+*.log
+*.tmp
+*.bak
+
