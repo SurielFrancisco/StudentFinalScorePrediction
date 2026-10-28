@@ -109,7 +109,38 @@ jobs:
           MODEL_NAME: ${{ secrets.MODEL_NAME }}
           MODEL_SHA: ${{ github.event.client_payload.sha }}
         run: |
+          set -euo pipefail
+
           IMAGE="$DOCKER_USER/$MODEL_NAME:$MODEL_SHA"
 
           docker build --platform linux/amd64 -t "$IMAGE" .
           docker push "$IMAGE"
+
+      - name: Deploy image to Render
+        if: github.event_name == 'repository_dispatch'
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+          DOCKER_USER: ${{ secrets.DOCKER_USER }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+          MODEL_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$RENDER_DEPLOY_HOOK_URL" ]]; then
+            echo "::error::Falta el secreto RENDER_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+
+          IMAGE_URL="docker.io/${DOCKER_USER}/${MODEL_NAME}:${MODEL_SHA}"
+
+          echo "Solicitando despliegue en Render: ${IMAGE_URL}"
+
+          RESPONSE=$(curl \
+            --fail-with-body \
+            --show-error \
+            --silent \
+            --get "$RENDER_DEPLOY_HOOK_URL" \
+            --data-urlencode "imgURL=${IMAGE_URL}")
+
+          echo "Respuesta de Render:"
+          echo "$RESPONSE"
